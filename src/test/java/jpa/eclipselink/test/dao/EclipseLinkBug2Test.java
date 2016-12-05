@@ -6,12 +6,14 @@ import javax.persistence.Persistence;
 import javax.persistence.RollbackException;
 import javax.validation.ConstraintViolationException;
 
+import org.eclipse.persistence.internal.jpa.metadata.listeners.BeanValidationListener;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
 import jpa.eclipselink.test.domain.Bug2Entity;
+import jpa.eclipselink.test.domain.Bug2Entity2WithWorkAround;
 
 public class EclipseLinkBug2Test {
 
@@ -99,6 +101,43 @@ public class EclipseLinkBug2Test {
                     + "Eclipse link is not firing the constraint violation exception because the "
                     + "org.eclipse.persistence.internal.jpa.metadata.listeners.BeanValiationListner "
                     + " does not subscribe to the preInsert event. So if commit we violate a business rule.");
+        } catch (ConstraintViolationException | RollbackException e) {
+            System.out.println(
+                    "Yes we would have liked eclipselink to have triggered the JSR bean validation and to get the constraint violation."
+                            + " Instead we now have a corrupt database. ");
+        }
+
+    }
+
+    /**
+     * To understand this ISSUE please read the answer on: <a href=
+     * "http://stackoverflow.com/questions/37310853/how-to-get-eclipselink-to-fire-jsr303-constraints-in-mapped-super-class/40942442#40942442">
+     * Explains the issue On the BeanValidationHelper class</a>
+     *
+     * <P>
+     * Here we work-around the problem by using a work-around entity bug B that is annotated with an envent listener
+     * that subscribes to the pre-insert event. Therefore closing the hole on the default inmplementation of the
+     * {@link BeanValidationListener}.
+     *
+     */
+    @Test
+    public void workAroundTheIssueByUsingAnEventListenerOnPreInsert() {
+        // (a) we start by calling persist on a fresh new entity thaat starts off being valid
+        Bug2Entity2WithWorkAround bugThatNeedsFixing = new Bug2Entity2WithWorkAround();
+        bugThatNeedsFixing.setNotNullField("InThisTestTheNotNullFieldIsIrrelevantToUs");
+        bugThatNeedsFixing.setAge(ALLOWED_AGE);
+        em.persist(bugThatNeedsFixing);
+
+        // (b) now we demonstrate how eclipse link fails to invoke the JSR validations on entity
+        // when we modify the entity during the transaction
+
+        try {
+            bugThatNeedsFixing.setAge(NOT_ALLOWED_AGE);
+            em.getTransaction().commit();
+
+            Assert.fail(
+                    "Our code will not reach this point because our Bug2Entity2WithWorkAround now has an eclipselink event listener "
+                            + " that will handled the pre-insert event and route the JSR 303 bean validation to the normal event listner from eclipselink.");
         } catch (ConstraintViolationException | RollbackException e) {
             System.out.println(
                     "Yes we would have liked eclipselink to have triggered the JSR bean validation and to get the constraint violation."
